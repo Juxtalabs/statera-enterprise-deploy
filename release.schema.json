@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Juxtalabs/statera-enterprise-deploy/release.schema.json",
+  "title": "Statera application release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release",
+    "source_commit",
+    "app_image",
+    "postgres_image",
+    "migration_head",
+    "minimum_cli",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "release": {
+      "type": "string",
+      "pattern": "^app-v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "app_image": {
+      "type": "string",
+      "pattern": "^ghcr\\.io/juxtalabs/statera-app@sha256:[0-9a-f]{64}$"
+    },
+    "postgres_image": {
+      "type": "string",
+      "pattern": "^ghcr\\.io/juxtalabs/statera-postgres@sha256:[0-9a-f]{64}$"
+    },
+    "migration_head": {
+      "type": "string",
+      "minLength": 1
+    },
+    "minimum_cli": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

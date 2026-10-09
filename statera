@@ -1,0 +1,185 @@
+#!/bin/sh
+# The `statera` command on a company's server (installed to
+# /usr/local/bin/statera by install.sh). Everything runs inside the App
+# container, except what has to happen around it:
+#
+#   statera version                        the CLI and the installed App release
+#   statera self-update vX.Y.Z             update the CLI/bundle from a release
+#   statera update [--to app-vX.Y.Z]       the App update (update.sh)
+#   statera update --schedule "<window>"   e.g. "sun 02:00", "daily 03:30", "off"
+#   statera restore <archive>              stops the App, restores, starts it
+#   statera offsite-backup restore …       stops the App, restores from S3
+#                                          (pgBackRest on the Postgres host,
+#                                          then the attachments), starts it
+#   statera logs [service]                 container logs
+#   statera <anything else>                `statera <...>` inside the App
+#                                          (doctor, backup, offsite-backup
+#                                          run|status|init, license status|refresh,
+#                                          admin reset-passkeys --username …)
+set -eu
+
+STATERA_CLI_VERSION=1.2.0
+STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
+DIR=${STATERA_DIR:-/opt/statera}
+compose() { docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" "$@"; }
+
+case "${1:-}" in
+  version)
+    printf 'statera %s\n' "$STATERA_CLI_VERSION"
+    if [ -f "$DIR/state/current-release" ] \
+      && release=$(sed -n '1p' "$DIR/state/current-release" 2>/dev/null); then
+      printf 'app %s\n' "$release"
+    fi
+    ;;
+  self-update)
+    shift
+    if [ $# -ne 1 ]; then
+      echo "usage: statera self-update vX.Y.Z" >&2
+      exit 2
+    fi
+    target=$1
+    case "$target" in
+      v[0-9]*.[0-9]*.[0-9]*) ;;
+      *) echo "usage: statera self-update vX.Y.Z" >&2; exit 2 ;;
+    esac
+    [ "$(id -u)" = 0 ] || { echo "self-update: run as root (sudo)" >&2; exit 1; }
+    if [ "$target" = "v$STATERA_CLI_VERSION" ]; then
+      echo "statera $STATERA_CLI_VERSION is already installed"
+      exit 0
+    fi
+    for command in curl sha256sum awk; do
+      command -v "$command" >/dev/null 2>&1 || { echo "self-update: required command is missing: $command" >&2; exit 1; }
+    done
+    base=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/$target}
+    tmp=$(mktemp -d)
+    trap 'rm -r "$tmp"' EXIT HUP INT TERM
+    # https only, except an explicit http base (a local end-to-end rehearsal).
+    case "$base" in
+      https://*) proto='=https' ;;
+      http://*) proto='=http' ;;
+      *) echo "self-update: the release base must be an http(s) URL: $base" >&2; exit 1 ;;
+    esac
+    curl --proto "$proto" --tlsv1.2 -fsSL "$base/install.sh" -o "$tmp/install.sh" \
+      || { echo "self-update: $target/install.sh could not be downloaded from $base" >&2; exit 1; }
+    curl --proto "$proto" --tlsv1.2 -fsSL "$base/install.sh.sha256" -o "$tmp/install.sh.sha256" \
+      || { echo "self-update: $target/install.sh.sha256 could not be downloaded from $base" >&2; exit 1; }
+    expected=$(awk 'NR == 1 && $1 ~ /^[0-9a-f]{64}$/ {print $1}' "$tmp/install.sh.sha256")
+    actual=$(sha256sum "$tmp/install.sh" | awk '{print $1}')
+    [ -n "$expected" ] && [ "$actual" = "$expected" ] \
+      || { echo "self-update: the installer checksum did not match" >&2; exit 1; }
+    sh "$tmp/install.sh" --self-update
+    ;;
+  update)
+    shift
+    if [ "${1:-}" = "--schedule" ]; then
+      [ $# -ge 2 ] || { echo "usage: statera update --schedule \"<day> <HH:MM>\"|off" >&2; exit 2; }
+      compose exec -T app statera update-schedule "$2"
+      exit $?
+    fi
+    exec sh "$DIR/update.sh" "$@"
+    ;;
+  restore)
+    shift
+    [ $# -ge 1 ] || { echo "usage: statera restore <archive in /var/lib/statera/backups>" >&2; exit 2; }
+    compose stop app
+    status=0
+    compose run --rm --no-deps -T app statera restore "$1" --yes || status=$?
+    compose up -d app
+    exit "$status"
+    ;;
+  offsite-backup)
+    shift
+    if [ "${1:-}" != "restore" ]; then
+      if [ -t 0 ] && [ -t 1 ]; then
+        compose exec app statera offsite-backup "$@"
+        exit $?
+      fi
+      compose exec -T app statera offsite-backup "$@"
+      exit $?
+    fi
+    shift
+    # Restore from S3 (E3), run by Juxtalabs. The database must be restored
+    # on the PostgreSQL host, so pgBackRest runs in the PostgreSQL image
+    # (lokal mode) with the App and the database stopped; the attachments are
+    # then put back by the App, which needs Juxtalabs' age identity.
+    usage="usage: statera offsite-backup restore [--target \"YYYY-MM-DD HH:MM:SS+00\"] --identity <age-identity file>"
+    target="" identity=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --target) target=$2; shift 2 ;;
+        --identity) identity=$2; shift 2 ;;
+        *) echo "$usage" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$identity" ] || { echo "$usage" >&2; exit 2; }
+    [ -f "$identity" ] || { echo "Error: the identity file does not exist: $identity" >&2; exit 1; }
+    [ "$(id -u)" = 0 ] || { echo "Error: run as root (sudo)" >&2; exit 1; }
+
+    echo "== stopping the App and PostgreSQL"
+    compose stop app
+    compose stop postgres
+    echo "== emptying the PostgreSQL data directory"
+    compose run --rm --no-deps --entrypoint sh postgres \
+      -c 'find /var/lib/postgresql/data -mindepth 1 -delete' \
+      || { echo "Error: the data directory could not be emptied" >&2; exit 1; }
+    echo "== restoring the database from S3 (pgBackRest)"
+    status=0
+    if [ -n "$target" ]; then
+      compose run --rm --no-deps postgres \
+        pgbackrest --stanza=statera --type=time --target="$target" --target-action=promote restore || status=$?
+    else
+      compose run --rm --no-deps postgres \
+        pgbackrest --stanza=statera restore || status=$?
+    fi
+    if [ "$status" != 0 ]; then
+      compose up -d postgres
+      echo "Error: the database restore failed — PostgreSQL was started again on the emptied data directory" >&2
+      exit "$status"
+    fi
+    echo "== starting PostgreSQL"
+    compose up -d postgres >/dev/null
+    tries=0
+    until compose exec -T postgres pg_isready -U statera -d statera >/dev/null 2>&1; do
+      tries=$((tries + 1))
+      [ $tries -lt 36 ] || { echo "Error: PostgreSQL did not come back after the restore" >&2; exit 1; }
+      sleep 5
+    done
+    echo "== restoring the attachments (age, with the escrow identity)"
+    status=0
+    compose run --rm --no-deps -T \
+      -v "$identity:/tmp/statera-attachments-identity:ro" app \
+      sh -c 'statera db migrate && statera offsite-backup restore --identity /tmp/statera-attachments-identity' \
+      || status=$?
+    compose up -d app
+    if [ "$status" != 0 ]; then
+      echo "Error: the attachments could not be restored (see above)" >&2
+      exit "$status"
+    fi
+    echo "restored from S3; the App is starting"
+    exit 0
+    ;;
+  logs)
+    shift
+    compose logs --tail=200 "$@"
+    ;;
+  doctor)
+    shift
+    status=0
+    compose exec -T app statera doctor || status=$?
+    echo "--- host"
+    df -h / /var/lib/docker 2>/dev/null | sed 's/^/      /'
+    compose ps --format '{{.Service}}: {{.Status}}' | sed 's/^/ok    /'
+    exit "$status"
+    ;;
+  "")
+    compose exec app statera --help
+    ;;
+  *)
+    if [ -t 0 ] && [ -t 1 ]; then
+      compose exec app statera "$@"
+      exit $?
+    fi
+    compose exec -T app statera "$@"
+    exit $?
+    ;;
+esac

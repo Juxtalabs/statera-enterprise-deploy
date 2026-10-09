@@ -1,0 +1,7 @@
+# HTTPS for the installation's domain. Caddy obtains and renews the
+# certificate itself (HTTP-01: the domain's A record must point at this
+# server and port 80 must be reachable). The App serves the UI and the API.
+{$STATERA_DOMAIN} {
+	encode gzip
+	reverse_proxy app:8000
+}

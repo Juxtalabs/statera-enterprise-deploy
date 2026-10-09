@@ -1,0 +1,88 @@
+name: Release Statera deployment CLI
+
+# A tag `vX.Y.Z` publishes the deployment tooling: the installer, the bundle,
+# the release schema, and their checksums. Application releases use the
+# separate `app-vX.Y.Z` namespace and are published into this repository's
+# releases by the private statera-erp repository.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the deployment repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Pin ShellCheck
+        run: |
+          set -Eeuo pipefail
+          scratch="$(mktemp -d)"
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz" | tar -xJ -C "$scratch"
+          sudo install -m 0755 "$scratch/shellcheck-v0.11.0/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version | head -2
+
+      - name: Validate the version and the scripts
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          expected="${RELEASE_TAG#v}"
+          installer_version="$(sed -n 's/^STATERA_CLI_VERSION=//p' install.sh | head -n 1)"
+          updater_version="$(sed -n 's/^STATERA_CLI_VERSION=//p' update.sh | head -n 1)"
+          command_version="$(sed -n 's/^STATERA_CLI_VERSION=//p' statera | head -n 1)"
+          test "$installer_version" = "$expected"
+          test "$updater_version" = "$expected"
+          test "$command_version" = "$expected"
+          sh -n install.sh
+          sh -n lib.sh
+          sh -n update.sh
+          sh -n updater.sh
+          sh -n statera
+          bash -n tests/test-statera.sh
+          shellcheck -x install.sh lib.sh update.sh updater.sh statera tests/test-statera.sh
+          bash tests/test-statera.sh
+
+      - name: Validate the Compose definition
+        run: |
+          set -Eeuo pipefail
+          cat > .env <<'EOF'
+          STATERA_RELEASE=app-v1.1.0
+          STATERA_IMAGE=ghcr.io/juxtalabs/statera-app@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          STATERA_POSTGRES_IMAGE=ghcr.io/juxtalabs/statera-postgres@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          STATERA_DOMAIN=example.invalid
+          POSTGRES_PASSWORD=release-check
+          EOF
+          docker compose -f docker-compose.yml config --quiet
+
+      - name: Create the checksums
+        run: |
+          set -Eeuo pipefail
+          sha256sum lib.sh statera update.sh updater.sh docker-compose.yml Caddyfile release.schema.json > SHA256SUMS
+          sha256sum install.sh > install.sh.sha256
+
+      - name: Publish the immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --title "Statera deployment CLI $RELEASE_TAG" \
+            --generate-notes \
+            install.sh \
+            install.sh.sha256 \
+            lib.sh \
+            statera \
+            update.sh \
+            updater.sh \
+            docker-compose.yml \
+            Caddyfile \
+            release.schema.json \
+            SHA256SUMS

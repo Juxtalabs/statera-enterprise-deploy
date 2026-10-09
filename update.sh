@@ -22,7 +22,7 @@
 #                                 (default: the App release's GitHub page)
 set -eu
 
-STATERA_CLI_VERSION=1.2.0
+STATERA_CLI_VERSION=1.2.1
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 DIR=${STATERA_DIR:-/opt/statera}
 log() { echo "statera update: $*"; }
@@ -34,7 +34,15 @@ fi
 # shellcheck source=/dev/null
 . "$DIR/lib.sh"
 
-compose() { docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" "$@"; }
+# docker-compose.proxy.yml exists when install.sh was given --proxy-network: it
+# joins the App to an existing reverse proxy's Docker network.
+compose() {
+  if [ -f "$DIR/docker-compose.proxy.yml" ]; then
+    docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" -f "$DIR/docker-compose.proxy.yml" "$@"
+  else
+    docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" "$@"
+  fi
+}
 app() { compose exec -T app statera "$@"; }
 
 [ -f "$DIR/.env" ] || statera_die "$DIR/.env does not exist: Statera is not installed"

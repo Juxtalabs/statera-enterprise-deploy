@@ -4,14 +4,16 @@
 #
 # Download the pinned, checksummed installer of a CLI release and run it:
 #
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.0/install.sh -o install.sh
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.0/install.sh.sha256 -o install.sh.sha256
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.1/install.sh -o install.sh
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.1/install.sh.sha256 -o install.sh.sha256
 #   sha256sum --check install.sh.sha256
-#   sudo sh install.sh --domain rkb-statera.juxtalabs.io --activation-code XXXX-XXXX-XXXX \
-#                     --entity-code RKB --entity-name "PT Riset Kecerdasan Buatan" \
-#                     --s3-bucket statera-backup-rkb-151985018124-ap-southeast-1-an \
-#                     --s3-region ap-southeast-1 \
-#                     --s3-access-key-id AKIA... --s3-secret-access-key ... 
+#   sudo sh install.sh --domain erp.example.co.id --release app-v1.2.0 \
+#                     --entity-code PTABC --entity-name "PT Contoh Abadi" \
+#                     --s3-bucket statera-backup-ptabc --s3-region ap-southeast-1 \
+#                     --s3-access-key-id AKIAXXXXXXXXXXXXXXXX
+#
+# The activation code and the S3 secret are asked for (hidden) when they are
+# not given as options, so they stay out of the shell history and `ps`.
 #
 # The bundle files and the App release manifest are downloaded from the same
 # releases and verified against their checksums; the App image is pinned by
@@ -19,14 +21,19 @@
 #
 # Options:
 #   --domain <name>           the address users open (its DNS A record must point here)
-#   --activation-code <code>  the one-time code from Juxtalabs
+#   --activation-code <code>  the one-time code from Juxtalabs (asked for when omitted)
 #   --entity-code <code>      the first legal entity's code (max 20 characters)
 #   --entity-name <name>      its name
-#   --release <app-vX.Y.Z>    the App release to install (default app-v<CLI version>)
+#   --release <app-vX.Y.Z>    the App release to install (default: the one this CLI
+#                             was released with, DEFAULT_APP_RELEASE below)
 #   --self-update             refresh the bundle files only (`statera self-update`)
 #   --no-proxy                another reverse proxy already serves 80/443 here: the App
 #                             listens on 127.0.0.1:<port> and that proxy forwards to it
 #   --port <n>                that loopback port (default 8000)
+#   --proxy-network <name>    with --no-proxy, when that reverse proxy runs in Docker:
+#                             the App also joins this existing Docker network, and the
+#                             proxy forwards to http://statera-app-1:8000 (a containerised
+#                             proxy cannot reach the host's 127.0.0.1)
 #   --control-url <url>       Statera Control (default https://statera-control.juxtalabs.io;
 #                             an explicit http:// URL is allowed for a local rehearsal)
 #
@@ -34,7 +41,7 @@
 #   --s3-bucket <name>            the company's private bucket
 #   --s3-region <region>          e.g. ap-southeast-1
 #   --s3-access-key-id <id>       the IAM user Juxtalabs created for this company
-#   --s3-secret-access-key <key>  its secret
+#   --s3-secret-access-key <key>  its secret (asked for when omitted)
 #   --s3-endpoint <host[:port]>   an S3-compatible endpoint (MinIO); AWS is the default
 #
 # Without the four S3 options the install has no offsite backup: nothing runs
@@ -56,18 +63,35 @@
 # and pulled with a credential Control issues for the activation code.
 set -eu
 
-STATERA_CLI_VERSION=1.2.0
+STATERA_CLI_VERSION=1.2.1
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 RELEASE_BASE=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/v$STATERA_CLI_VERSION}
 DIR=${STATERA_DIR:-/opt/statera}
 CONTROL=https://statera-control.juxtalabs.io
 CONTROL_EXPLICIT=0
-DOMAIN="" CODE="" ENTITY_CODE="" ENTITY_NAME="" PROXY=1 PORT=8000
-APP_RELEASE="app-v$STATERA_CLI_VERSION" SELF_UPDATE=0
+# The App release this CLI was published with; CLI and App versions move
+# separately, so a CLI fix does not name an App release that does not exist.
+DEFAULT_APP_RELEASE=app-v1.2.0
+DOMAIN="" CODE="" ENTITY_CODE="" ENTITY_NAME="" PROXY=1 PORT=8000 PROXY_NETWORK=""
+APP_RELEASE=$DEFAULT_APP_RELEASE SELF_UPDATE=0
 S3_BUCKET="" S3_REGION="" S3_ACCESS="" S3_SECRET="" S3_ENDPOINT=""
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 note() { printf '== %s\n' "$*"; }
+
+# Read a secret from the terminal without echoing it; the value goes to
+# stdout. Without a terminal the option has to be given instead.
+ask_secret() {
+  [ -t 0 ] || die "$1 is missing: give it as an option when not running in a terminal"
+  printf '%s (hidden): ' "$1" >&2
+  stty -echo
+  trap 'stty echo' EXIT INT TERM
+  IFS= read -r _secret || _secret=""
+  stty echo
+  trap - EXIT INT TERM
+  printf '\n' >&2
+  printf '%s' "$_secret"
+}
 
 # Download one asset. https only, except an explicit http base — which exists
 # solely so a local HTTP server can rehearse a release end to end through
@@ -101,6 +125,7 @@ while [ $# -gt 0 ]; do
     --self-update) SELF_UPDATE=1; shift ;;
     --no-proxy) PROXY=0; shift ;;
     --port) PORT=$2; shift 2 ;;
+    --proxy-network) PROXY_NETWORK=$2; shift 2 ;;
     --control-url) CONTROL=$2; CONTROL_EXPLICIT=1; shift 2 ;;
     --s3-bucket) S3_BUCKET=$2; shift 2 ;;
     --s3-region) S3_REGION=$2; shift 2 ;;
@@ -121,8 +146,8 @@ fi
 OFFSITE=0
 if [ -n "$S3_BUCKET$S3_REGION$S3_ACCESS$S3_SECRET$S3_ENDPOINT" ]; then
   OFFSITE=1
-  [ -n "$S3_BUCKET" ] && [ -n "$S3_REGION" ] && [ -n "$S3_ACCESS" ] && [ -n "$S3_SECRET" ] \
-    || die "--s3-bucket, --s3-region, --s3-access-key-id and --s3-secret-access-key go together"
+  [ -n "$S3_BUCKET" ] && [ -n "$S3_REGION" ] && [ -n "$S3_ACCESS" ] \
+    || die "--s3-bucket, --s3-region and --s3-access-key-id go together (the secret is asked for)"
 fi
 
 [ "$(id -u)" = 0 ] || die "run as root (sudo)"
@@ -136,10 +161,21 @@ for command in curl jq sha256sum flock openssl awk sed grep sort df docker; do
 done
 
 if [ "$SELF_UPDATE" = 0 ]; then
-  [ -n "$DOMAIN" ] && [ -n "$CODE" ] && [ -n "$ENTITY_CODE" ] && [ -n "$ENTITY_NAME" ] \
-    || die "--domain, --activation-code, --entity-code and --entity-name are required"
+  [ -n "$DOMAIN" ] && [ -n "$ENTITY_CODE" ] && [ -n "$ENTITY_NAME" ] \
+    || die "--domain, --entity-code and --entity-name are required"
+  [ -n "$CODE" ] || CODE=$(ask_secret "Activation code")
+  [ -n "$CODE" ] || die "the activation code is required"
+  if [ "$OFFSITE" = 1 ] && [ -z "$S3_SECRET" ]; then
+    S3_SECRET=$(ask_secret "S3 secret access key")
+    [ -n "$S3_SECRET" ] || die "the S3 secret access key is required with --s3-bucket"
+  fi
   docker info >/dev/null 2>&1 || die "Docker Engine is not running or is not accessible"
   docker compose version >/dev/null 2>&1 || die "the Docker compose plugin is not installed"
+  if [ -n "$PROXY_NETWORK" ]; then
+    [ "$PROXY" = 0 ] || die "--proxy-network goes with --no-proxy"
+    docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1 \
+      || die "the Docker network $PROXY_NETWORK does not exist (it is the reverse proxy's network)"
+  fi
 fi
 
 mkdir -p "$DIR"
@@ -274,7 +310,29 @@ APP_IMAGE=$(statera_manifest_value "$manifest" app_image)
 POSTGRES_IMAGE=$(statera_manifest_value "$manifest" postgres_image)
 MIGRATION_HEAD=$(statera_manifest_value "$manifest" migration_head)
 
-compose() { docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" "$@"; }
+# docker-compose.proxy.yml exists when install.sh was given --proxy-network: it
+# joins the App to an existing reverse proxy's Docker network.
+compose() {
+  if [ -f "$DIR/docker-compose.proxy.yml" ]; then
+    docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" -f "$DIR/docker-compose.proxy.yml" "$@"
+  else
+    docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml" "$@"
+  fi
+}
+
+if [ -n "$PROXY_NETWORK" ]; then
+  cat >"$DIR/docker-compose.proxy.yml" <<EOF
+# Written by install.sh --proxy-network: the App also joins the existing
+# reverse proxy's Docker network, which forwards to http://statera-app-1:8000.
+services:
+  app:
+    networks: [default, proxy]
+networks:
+  proxy:
+    name: $PROXY_NETWORK
+    external: true
+EOF
+fi
 
 note "the image credential from Statera Control"
 registry=$(control_fetch -X POST "$CONTROL/v1/registry" \
@@ -415,11 +473,20 @@ printf '%s\n' "$MIGRATION_HEAD" >"$DIR/state/current-migration"
 chmod 600 "$DIR/state/current-release" "$DIR/state/current-migration"
 statera_record_operation "$DIR/state" install "$APP_RELEASE" succeeded
 
+if [ "$PROXY" = 1 ]; then
+  proxy_target="Caddy (HTTPS on this server)"
+elif [ -n "$PROXY_NETWORK" ]; then
+  proxy_target="http://statera-app-1:8000 on the Docker network $PROXY_NETWORK"
+else
+  proxy_target="http://127.0.0.1:$PORT"
+fi
+
 cat <<EOF
 
 Statera $APP_RELEASE is installed (database at $MIGRATION_HEAD).
 
   Open        https://$DOMAIN
+  Proxy to    $proxy_target
   Sign in as  admin
   Password    $ADMIN_PASSWORD   (shown once — the first sign-in sets up a passkey)
 

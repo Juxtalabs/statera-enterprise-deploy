@@ -28,20 +28,24 @@ Download the pinned installer, verify it, and run it with the values
 Juxtalabs issued (the activation code, the first legal entity's code and name):
 
 ```bash
-VERSION=v1.2.0
+VERSION=v1.2.1
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh" -o install.sh
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh.sha256" -o install.sh.sha256
 sha256sum --check install.sh.sha256
 sudo sh install.sh \
-  --domain rkb-statera.juxtalabs.io \
-  --activation-code XXXX-XXXX-XXXX \
-  --entity-code RKB \
-  --entity-name "PT Riset Kecerdasan Buatan"
+  --domain erp.example.co.id \
+  --release app-v1.2.0 \
+  --entity-code PTABC \
+  --entity-name "PT Contoh Abadi"
 ```
+
+The activation code is asked for (hidden) unless given as `--activation-code`.
 
 On a server whose 80/443 already belong to another reverse proxy, add
 `--no-proxy --port 8000`: the App then listens on `127.0.0.1:8000` and that
-proxy forwards to it.
+proxy forwards to it. When that proxy runs in Docker, also add
+`--proxy-network <its network>`: the App joins that network and the proxy
+forwards to `http://statera-app-1:8000`.
 
 The installer refuses to run as anything but root on Linux x86-64, checks the
 required commands, free disk and ports, refuses to adopt an existing Compose
@@ -62,7 +66,7 @@ sudo statera version              # the CLI version and the installed App releas
 sudo statera update               # the App: backup → pull the pinned digest →
                                   # migrate → health and migration-head checks →
                                   # rollback + restore on failure
-sudo statera self-update v1.2.0   # the CLI/bundle: download, verify, reinstall
+sudo statera self-update v1.2.1   # the CLI/bundle: download, verify, reinstall
 ```
 
 `statera update` without a target installs the newest release the last check-in

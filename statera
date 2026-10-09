@@ -18,7 +18,7 @@
 #                                          admin reset-passkeys --username …)
 set -eu
 
-STATERA_CLI_VERSION=1.2.1
+STATERA_CLI_VERSION=1.2.2
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 DIR=${STATERA_DIR:-/opt/statera}
 # docker-compose.proxy.yml exists when install.sh was given --proxy-network: it

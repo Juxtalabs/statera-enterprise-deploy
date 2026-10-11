@@ -4,8 +4,8 @@
 #
 # Download the pinned, checksummed installer of a CLI release and run it:
 #
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.0/install.sh -o install.sh
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.0/install.sh.sha256 -o install.sh.sha256
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.1/install.sh -o install.sh
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.1/install.sh.sha256 -o install.sh.sha256
 #   sha256sum --check install.sh.sha256
 #   sudo sh install.sh --domain erp.example.co.id --release app-v1.2.0 \
 #                     --entity-code PTABC --entity-name "PT Contoh Abadi" \
@@ -67,7 +67,7 @@
 # and pulled with a credential Control issues for the activation code.
 set -eu
 
-STATERA_CLI_VERSION=1.3.0
+STATERA_CLI_VERSION=1.3.1
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 RELEASE_BASE=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/v$STATERA_CLI_VERSION}
 DIR=${STATERA_DIR:-}
@@ -342,8 +342,16 @@ actual=$(sha256sum "$tmp/lib.sh" | awk '{print $1}')
 for file in "$@"; do
   statera_verify_against_sums "$tmp/$file" "$file" "$tmp/SHA256SUMS"
 done
+# The scripts go in by rename: `statera self-update` and the updater are still
+# running the old file, and a shell reads its script as it goes.
 for file in "$@"; do
-  cp "$tmp/$file" "$DIR/$file"
+  case "$file" in
+    *.sh | statera)
+      cp "$tmp/$file" "$DIR/$file.new"
+      mv -f "$DIR/$file.new" "$DIR/$file"
+      ;;
+    *) cp "$tmp/$file" "$DIR/$file" ;;
+  esac
 done
 chmod 755 "$DIR/statera" "$DIR/update.sh" "$DIR/updater.sh"
 chmod 644 "$DIR/Caddyfile" "$DIR/docker-compose.yml" "$DIR/release.schema.json" "$DIR/lib.sh"

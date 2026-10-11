@@ -22,7 +22,7 @@
 #                                 (default: the App release's GitHub page)
 set -eu
 
-STATERA_CLI_VERSION=1.2.2
+STATERA_CLI_VERSION=1.2.3
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 DIR=${STATERA_DIR:-/opt/statera}
 log() { echo "statera update: $*"; }

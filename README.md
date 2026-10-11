@@ -28,7 +28,7 @@ Download the pinned installer, verify it, and run it with the values
 Juxtalabs issued (the activation code, the first legal entity's code and name):
 
 ```bash
-VERSION=v1.2.2
+VERSION=v1.2.3
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh" -o install.sh
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh.sha256" -o install.sh.sha256
 sha256sum --check install.sh.sha256
@@ -66,7 +66,7 @@ sudo statera version              # the CLI version and the installed App releas
 sudo statera update               # the App: backup → pull the pinned digest →
                                   # migrate → health and migration-head checks →
                                   # rollback + restore on failure
-sudo statera self-update v1.2.2   # the CLI/bundle: download, verify, reinstall
+sudo statera self-update v1.2.3   # the CLI/bundle: download, verify, reinstall
 ```
 
 `statera update` without a target installs the newest release the last check-in

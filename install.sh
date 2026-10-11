@@ -4,8 +4,8 @@
 #
 # Download the pinned, checksummed installer of a CLI release and run it:
 #
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.2/install.sh -o install.sh
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.2/install.sh.sha256 -o install.sh.sha256
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.3/install.sh -o install.sh
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.3/install.sh.sha256 -o install.sh.sha256
 #   sha256sum --check install.sh.sha256
 #   sudo sh install.sh --domain erp.example.co.id --release app-v1.2.0 \
 #                     --entity-code PTABC --entity-name "PT Contoh Abadi" \
@@ -63,7 +63,7 @@
 # and pulled with a credential Control issues for the activation code.
 set -eu
 
-STATERA_CLI_VERSION=1.2.2
+STATERA_CLI_VERSION=1.2.3
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 RELEASE_BASE=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/v$STATERA_CLI_VERSION}
 DIR=${STATERA_DIR:-/opt/statera}
@@ -148,6 +148,8 @@ if [ -n "$S3_BUCKET$S3_REGION$S3_ACCESS$S3_SECRET$S3_ENDPOINT" ]; then
   OFFSITE=1
   [ -n "$S3_BUCKET" ] && [ -n "$S3_REGION" ] && [ -n "$S3_ACCESS" ] \
     || die "--s3-bucket, --s3-region and --s3-access-key-id go together (the secret is asked for)"
+  # pgBackRest in the PostgreSQL container has no default endpoint.
+  [ -n "$S3_ENDPOINT" ] || S3_ENDPOINT="s3.$S3_REGION.amazonaws.com"
 fi
 
 [ "$(id -u)" = 0 ] || die "run as root (sudo)"

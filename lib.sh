@@ -13,6 +13,20 @@ statera_die() {
   exit 1
 }
 
+# A valid install instance name (enhancement: several installs on one server):
+# 1–20 characters, the first a lowercase letter or digit, the rest letters,
+# digits or dashes. The name becomes a folder, a compose project and a command.
+statera_valid_instance() {
+  case "$1" in
+    [a-z0-9]*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *[!a-z0-9-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 20 ]
+}
+
 # Download one asset. https only, except an explicit http base — which exists
 # solely so a local HTTP server can rehearse a release end to end through
 # STATERA_RELEASE_BASE_URL / STATERA_APP_RELEASE_BASE_URL.

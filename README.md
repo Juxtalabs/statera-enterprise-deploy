@@ -28,7 +28,7 @@ Download the pinned installer, verify it, and run it with the values
 Juxtalabs issued (the activation code, the first legal entity's code and name):
 
 ```bash
-VERSION=v1.2.3
+VERSION=v1.3.0
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh" -o install.sh
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh.sha256" -o install.sh.sha256
 sha256sum --check install.sh.sha256
@@ -57,6 +57,27 @@ again: it resumes instead of starting over. Nothing in this repository is
 secret; the private image is pulled with the credential Statera Control issues
 for the activation code.
 
+## Several installs on one server
+
+One server can host several companies. `--instance <name>` (lowercase letters,
+digits and dashes, up to 20 characters) gives the install its own folder
+`/opt/statera-<name>`, its own Compose project and App container
+`statera-<name>-app-1`, and its own command `statera-<name>`. It also picks the
+first free loopback port from 8010, unless `--port` names one. It requires
+`--no-proxy`: only one install can own ports 80/443.
+
+```bash
+sudo sh install.sh --instance rsui-bogor --no-proxy \
+  --domain erp.rsui-bogor.example.co.id \
+  --release app-v1.2.0 \
+  --entity-code RSUIBG \
+  --entity-name "RSUI Bogor"
+```
+
+An install without `--instance` behaves exactly as before: `/opt/statera`, the
+project `statera`, the command `statera`, port 8000. Each instance still needs
+its own DNS record, activation code, S3 bucket and reverse-proxy entry.
+
 ## Updates
 
 The CLI and the App update separately, on purpose:
@@ -66,7 +87,7 @@ sudo statera version              # the CLI version and the installed App releas
 sudo statera update               # the App: backup → pull the pinned digest →
                                   # migrate → health and migration-head checks →
                                   # rollback + restore on failure
-sudo statera self-update v1.2.3   # the CLI/bundle: download, verify, reinstall
+sudo statera self-update v1.3.0   # the CLI/bundle: download, verify, reinstall
 ```
 
 `statera update` without a target installs the newest release the last check-in

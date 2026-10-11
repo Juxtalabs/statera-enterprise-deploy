@@ -57,6 +57,15 @@ if statera_version_is_older 1.0.1 1.0.0; then fail "1.0.1 is not older than 1.0.
 if statera_version_is_older 1.1.0 1.1.0; then fail "equal versions are not older"; fi
 if statera_version_is_older 1.10.0 1.9.0; then fail "1.10.0 is not older than 1.9.0"; fi
 
+# --- instance names ----------------------------------------------------------
+
+statera_valid_instance statera || fail "statera is a valid instance name"
+statera_valid_instance rsui-bogor || fail "rsui-bogor is a valid instance name"
+if statera_valid_instance ""; then fail "an empty instance name was accepted"; fi
+if statera_valid_instance RSui; then fail "an uppercase instance name was accepted"; fi
+if statera_valid_instance -bogor; then fail "an instance name starting with a dash was accepted"; fi
+if statera_valid_instance 0123456789abcdefghijk; then fail "a 21-character instance name was accepted"; fi
+
 # The release workflow validates the tag against these constants; the three
 # scripts must agree with each other even before CI exists.
 installer_version="$(sed -n 's/^STATERA_CLI_VERSION=//p' "$bundle/install.sh" | head -n 1)"

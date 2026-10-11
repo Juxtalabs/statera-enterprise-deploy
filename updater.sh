@@ -11,7 +11,7 @@
 # the network is up.
 set -u
 
-DIR=/opt/statera
+DIR=${STATERA_DIR:-/opt/statera}
 while ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; do
   echo "statera updater: installing curl and jq"
   if apk add --no-cache curl jq >/dev/null 2>&1; then

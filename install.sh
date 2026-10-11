@@ -4,8 +4,8 @@
 #
 # Download the pinned, checksummed installer of a CLI release and run it:
 #
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.3/install.sh -o install.sh
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.2.3/install.sh.sha256 -o install.sh.sha256
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.0/install.sh -o install.sh
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.0/install.sh.sha256 -o install.sh.sha256
 #   sha256sum --check install.sh.sha256
 #   sudo sh install.sh --domain erp.example.co.id --release app-v1.2.0 \
 #                     --entity-code PTABC --entity-name "PT Contoh Abadi" \
@@ -30,6 +30,10 @@
 #   --no-proxy                another reverse proxy already serves 80/443 here: the App
 #                             listens on 127.0.0.1:<port> and that proxy forwards to it
 #   --port <n>                that loopback port (default 8000)
+#   --instance <name>         a second, independent install on this server: the folder
+#                             /opt/statera-<name>, the compose project and command
+#                             statera-<name>, and the first free loopback port from 8010
+#                             (needs --no-proxy; every install keeps its own port)
 #   --proxy-network <name>    with --no-proxy, when that reverse proxy runs in Docker:
 #                             the App also joins this existing Docker network, and the
 #                             proxy forwards to http://statera-app-1:8000 (a containerised
@@ -63,16 +67,17 @@
 # and pulled with a credential Control issues for the activation code.
 set -eu
 
-STATERA_CLI_VERSION=1.2.3
+STATERA_CLI_VERSION=1.3.0
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 RELEASE_BASE=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/v$STATERA_CLI_VERSION}
-DIR=${STATERA_DIR:-/opt/statera}
+DIR=${STATERA_DIR:-}
 CONTROL=https://statera-control.juxtalabs.io
 CONTROL_EXPLICIT=0
 # The App release this CLI was published with; CLI and App versions move
 # separately, so a CLI fix does not name an App release that does not exist.
 DEFAULT_APP_RELEASE=app-v1.2.0
 DOMAIN="" CODE="" ENTITY_CODE="" ENTITY_NAME="" PROXY=1 PORT=8000 PROXY_NETWORK=""
+INSTANCE="" PORT_GIVEN=0
 APP_RELEASE=$DEFAULT_APP_RELEASE SELF_UPDATE=0
 S3_BUCKET="" S3_REGION="" S3_ACCESS="" S3_SECRET="" S3_ENDPOINT=""
 
@@ -124,8 +129,9 @@ while [ $# -gt 0 ]; do
     --release) APP_RELEASE=$2; shift 2 ;;
     --self-update) SELF_UPDATE=1; shift ;;
     --no-proxy) PROXY=0; shift ;;
-    --port) PORT=$2; shift 2 ;;
+    --port) PORT=$2; PORT_GIVEN=1; shift 2 ;;
     --proxy-network) PROXY_NETWORK=$2; shift 2 ;;
+    --instance) INSTANCE=$2; shift 2 ;;
     --control-url) CONTROL=$2; CONTROL_EXPLICIT=1; shift 2 ;;
     --s3-bucket) S3_BUCKET=$2; shift 2 ;;
     --s3-region) S3_REGION=$2; shift 2 ;;
@@ -140,6 +146,33 @@ if [ "$CONTROL_EXPLICIT" = 1 ]; then
     https://* | http://*) ;;
     *) die "--control-url must be an http(s) URL: $CONTROL" ;;
   esac
+fi
+# `--instance` names one of several installs on the same server. The rule is
+# lib.sh's statera_valid_instance; it is inline here because lib.sh is only
+# downloaded later in the script.
+case "$INSTANCE" in
+  "" | [a-z0-9]*) ;;
+  *) die "--instance takes 1-20 lowercase letters, digits or dashes, starting with a letter or digit: $INSTANCE" ;;
+esac
+case "$INSTANCE" in
+  *[!a-z0-9-]*) die "--instance takes 1-20 lowercase letters, digits or dashes, starting with a letter or digit: $INSTANCE" ;;
+esac
+[ "${#INSTANCE}" -le 20 ] \
+  || die "--instance takes 1-20 lowercase letters, digits or dashes, starting with a letter or digit: $INSTANCE"
+# The folder, the compose project and the command name: a plain install keeps
+# /opt/statera, `statera` and `statera`; an instance takes its own copies.
+if [ -z "$DIR" ]; then
+  if [ -n "$INSTANCE" ]; then
+    DIR=/opt/statera-$INSTANCE
+  else
+    DIR=/opt/statera
+  fi
+fi
+PROJECT=statera
+COMMAND_NAME=statera
+if [ -n "$INSTANCE" ]; then
+  PROJECT="statera-$INSTANCE"
+  COMMAND_NAME="statera-$INSTANCE"
 fi
 # The offsite backup is all four settings or none: a half-configured bucket
 # is a backup that fails at 01:00, months from now.
@@ -178,6 +211,9 @@ if [ "$SELF_UPDATE" = 0 ]; then
     docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1 \
       || die "the Docker network $PROXY_NETWORK does not exist (it is the reverse proxy's network)"
   fi
+  if [ -n "$INSTANCE" ]; then
+    [ "$PROXY" = 0 ] || die "--instance needs --no-proxy: only one install can own ports 80/443"
+  fi
 fi
 
 mkdir -p "$DIR"
@@ -195,18 +231,36 @@ if [ "$SELF_UPDATE" = 0 ] && [ -f "$DIR/.env" ]; then
   note "resuming the incomplete installation with the existing $DIR/.env"
 fi
 
+# Every instance install needs its own loopback port: the first one from 8010
+# that is not listening, unless --port was given. A resume reuses the port it
+# already has in .env, and a host without `ss` has to name one with --port.
+if [ "$SELF_UPDATE" = 0 ] && [ -n "$INSTANCE" ] && [ "$PORT_GIVEN" = 0 ]; then
+  PORT=""
+  if [ "$RESUME" = 1 ]; then
+    PORT=$(sed -n 's/^STATERA_APP_PORT=//p' "$DIR/.env" | head -n 1)
+  fi
+  if [ -z "$PORT" ]; then
+    command -v ss >/dev/null 2>&1 \
+      || die "--instance cannot pick a free port without ss: give --port"
+    PORT=8010
+    while ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:|\])$PORT\$"; do
+      PORT=$((PORT + 1))
+    done
+  fi
+fi
+
 # Refuse to adopt anything that looks like another Statera project. Skipped on
 # a resume: the partial run's own project, volumes and network are the point.
 preflight_new_install() {
-  docker compose ls --format json | jq -e '.[] | select(.Name == "statera")' >/dev/null 2>&1 \
-    && die "a Docker Compose project named statera already exists — Statera will not adopt it"
-  for volume in statera_pgdata statera_keys statera_attachments statera_backups statera_pgbackrest-spool statera_caddy-data statera_caddy-config; do
+  docker compose ls --format json | jq -e --arg project "$PROJECT" '.[] | select(.Name == $project)' >/dev/null 2>&1 \
+    && die "a Docker Compose project named $PROJECT already exists — Statera will not adopt it"
+  for volume in "${PROJECT}_pgdata" "${PROJECT}_keys" "${PROJECT}_attachments" "${PROJECT}_backups" "${PROJECT}_pgbackrest-spool" "${PROJECT}_caddy-data" "${PROJECT}_caddy-config"; do
     if docker volume inspect "$volume" >/dev/null 2>&1; then
       die "Docker volume $volume already exists — Statera will not adopt it"
     fi
   done
-  if docker network inspect statera_default >/dev/null 2>&1; then
-    die "Docker network statera_default already exists — Statera will not adopt it"
+  if docker network inspect "${PROJECT}_default" >/dev/null 2>&1; then
+    die "Docker network ${PROJECT}_default already exists — Statera will not adopt it"
   fi
   check_port "$PORT" "the App's loopback"
   if [ "$PROXY" = 1 ]; then
@@ -293,7 +347,7 @@ for file in "$@"; do
 done
 chmod 755 "$DIR/statera" "$DIR/update.sh" "$DIR/updater.sh"
 chmod 644 "$DIR/Caddyfile" "$DIR/docker-compose.yml" "$DIR/release.schema.json" "$DIR/lib.sh"
-ln -sf "$DIR/statera" /usr/local/bin/statera
+ln -sf "$DIR/statera" "/usr/local/bin/$COMMAND_NAME"
 
 if [ "$SELF_UPDATE" = 1 ]; then
   printf 'statera %s is installed at %s.\n' "$STATERA_CLI_VERSION" "$DIR/statera"
@@ -325,7 +379,7 @@ compose() {
 if [ -n "$PROXY_NETWORK" ]; then
   cat >"$DIR/docker-compose.proxy.yml" <<EOF
 # Written by install.sh --proxy-network: the App also joins the existing
-# reverse proxy's Docker network, which forwards to http://statera-app-1:8000.
+# reverse proxy's Docker network, which forwards to http://$PROJECT-app-1:8000.
 services:
   app:
     networks: [default, proxy]
@@ -390,6 +444,15 @@ LOCAL_TEXT_MODEL=statera-text
 LOCAL_VISION_MODEL=statera-vision
 TZ=Asia/Jakarta
 EOF
+  if [ -n "$INSTANCE" ]; then
+    cat >>"$DIR/.env" <<EOF
+# This install is one of several on this server (--instance): the folder, the
+# compose project and the command are named after it.
+STATERA_INSTANCE=$INSTANCE
+STATERA_PROJECT=$PROJECT
+STATERA_DIR=$DIR
+EOF
+  fi
   if [ "$OFFSITE" = 1 ]; then
     cat >>"$DIR/.env" <<EOF
 # The offsite backup (E3). BACKUP_ENABLED turns on after the repository is
@@ -478,7 +541,7 @@ statera_record_operation "$DIR/state" install "$APP_RELEASE" succeeded
 if [ "$PROXY" = 1 ]; then
   proxy_target="Caddy (HTTPS on this server)"
 elif [ -n "$PROXY_NETWORK" ]; then
-  proxy_target="http://statera-app-1:8000 on the Docker network $PROXY_NETWORK"
+  proxy_target="http://${PROJECT}-app-1:8000 on the Docker network $PROXY_NETWORK"
 else
   proxy_target="http://127.0.0.1:$PORT"
 fi
@@ -492,12 +555,26 @@ Statera $APP_RELEASE is installed (database at $MIGRATION_HEAD).
   Sign in as  admin
   Password    $ADMIN_PASSWORD   (shown once — the first sign-in sets up a passkey)
 
-  statera version                  this CLI and the installed App release
-  statera doctor                   check the installation
-  statera backup                   take a backup now
-  statera update                   install a newer release when one is offered
-  sudo statera self-update vX.Y.Z  update this CLI/bundle when a newer one is offered
+  $COMMAND_NAME version                  this CLI and the installed App release
+  $COMMAND_NAME doctor                   check the installation
+  $COMMAND_NAME backup                   take a backup now
+  $COMMAND_NAME update                   install a newer release when one is offered
+  sudo $COMMAND_NAME self-update vX.Y.Z  update this CLI/bundle when a newer one is offered
 
 Back up the key file somewhere safe (it decrypts the data and the backups):
   docker compose -f $DIR/docker-compose.yml exec app cat /etc/statera/keys.json
 EOF
+
+if [ -n "$PROXY_NETWORK" ]; then
+  cat <<EOF
+
+The reverse proxy forwards to the App on the Docker network (nginx example):
+
+      location / {
+        proxy_pass http://${PROJECT}-app-1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      }
+EOF
+fi

@@ -18,9 +18,18 @@
 #                                          admin reset-passkeys --username …)
 set -eu
 
-STATERA_CLI_VERSION=1.2.3
+STATERA_CLI_VERSION=1.3.0
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
-DIR=${STATERA_DIR:-/opt/statera}
+# The install folder: `STATERA_DIR` when set (an instance install exports it),
+# otherwise the folder this command was installed from. The symlink under
+# /usr/local/bin resolves to it, so an install that predates STATERA_DIR and
+# the one without an instance both keep finding /opt/statera.
+DIR=${STATERA_DIR:-}
+if [ -z "$DIR" ]; then
+  DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s' /opt/statera/statera)")
+  [ -n "$DIR" ] || DIR=/opt/statera
+fi
+export STATERA_DIR="$DIR"
 # docker-compose.proxy.yml exists when install.sh was given --proxy-network: it
 # joins the App to an existing reverse proxy's Docker network.
 compose() {
@@ -75,7 +84,17 @@ case "${1:-}" in
     actual=$(sha256sum "$tmp/install.sh" | awk '{print $1}')
     [ -n "$expected" ] && [ "$actual" = "$expected" ] \
       || { echo "self-update: the installer checksum did not match" >&2; exit 1; }
-    sh "$tmp/install.sh" --self-update
+    # An instance install records its name in `.env`; the refreshed installer
+    # needs it to keep updating /opt/statera-<name> and its own symlink.
+    instance=""
+    if [ -f "$DIR/.env" ]; then
+      instance=$(sed -n 's/^STATERA_INSTANCE=//p' "$DIR/.env" | head -n 1)
+    fi
+    if [ -n "$instance" ]; then
+      sh "$tmp/install.sh" --self-update --instance "$instance"
+    else
+      sh "$tmp/install.sh" --self-update
+    fi
     ;;
   update)
     shift

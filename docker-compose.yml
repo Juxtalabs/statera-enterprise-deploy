@@ -22,7 +22,7 @@
 # come from `./pgbackrest`, written by install.sh. An install without the
 # offsite backup is untouched: `BACKUP_ARCHIVE_MODE=off`, no stanza, no TLS.
 
-name: statera
+name: ${STATERA_PROJECT:-statera}
 
 x-pgbackrest-repo: &pgbackrest-repo
   PGBACKREST_STANZA: statera
@@ -141,11 +141,12 @@ services:
     depends_on: [app]
     environment:
       TZ: ${TZ:-Asia/Jakarta}
-    working_dir: /opt/statera
-    entrypoint: ["sh", "/opt/statera/updater.sh"]
+      STATERA_DIR: ${STATERA_DIR:-/opt/statera}
+    working_dir: ${STATERA_DIR:-/opt/statera}
+    entrypoint: ["sh", "${STATERA_DIR:-/opt/statera}/updater.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/statera:/opt/statera
+      - ${STATERA_DIR:-/opt/statera}:${STATERA_DIR:-/opt/statera}
 
 volumes:
   pgdata:

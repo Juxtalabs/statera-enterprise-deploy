@@ -12,7 +12,9 @@
 # Without --to, the target is the newest release the last check-in listed
 # (`statera update-schedule` prints it; versions there are bare x.y.z and are
 # normalized to app-vx.y.z). Run from the host (`statera update`) or by the
-# updater container in the scheduled window — the same path.
+# updater container — in the scheduled window, or when an administrator asked
+# for the update from the Lisensi & fitur screen — the same path. Every run is
+# recorded in the App's update history (`statera update-report`).
 #
 # STATERA_UPDATE_FORCE_FAIL=1 fails the health check on purpose: the
 # rehearsal of the rollback (acceptance 5).
@@ -22,7 +24,7 @@
 #                                 (default: the App release's GitHub page)
 set -eu
 
-STATERA_CLI_VERSION=1.3.1
+STATERA_CLI_VERSION=1.3.2
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 DIR=${STATERA_DIR:-/opt/statera}
 log() { echo "statera update: $*"; }
@@ -56,10 +58,11 @@ fi
 [ -n "$current" ] || statera_die "no release is recorded in $DIR: run the pinned installer again"
 
 target=""
+trigger=cli
 while [ $# -gt 0 ]; do
   case "$1" in
     --to) target=$2; shift 2 ;;
-    --scheduled) shift ;;
+    --scheduled) trigger=schedule; shift ;;
     *) echo "usage: statera update [--to app-vX.Y.Z]" >&2; exit 2 ;;
   esac
 done
@@ -79,6 +82,12 @@ if statera_version_is_older "$(statera_release_version "$target")" "$(statera_re
   statera_die "downgrades are not supported (this server is on $current)"
 fi
 log "$current → $target"
+
+# The outcome, for the update history. An App older than 1.3.2 does not know
+# the history's arguments: the plain form still records the failure there.
+report() {
+  app update-report --trigger "$trigger" --from "$current" --to "$target" "$@"     || app update-report "$@"
+}
 
 tmp=$(mktemp -d)
 trap 'rm -r "$tmp"' EXIT HUP INT TERM
@@ -106,7 +115,7 @@ statera_set_env "$DIR/.env" STATERA_IMAGE "$target_image"
 statera_set_env "$DIR/.env" STATERA_POSTGRES_IMAGE "$target_postgres"
 if ! compose pull app postgres; then
   cp -p "$DIR/state/previous.env" "$DIR/.env"
-  app update-report --error "the image $target could not be pulled; still on $current" || true
+  report --error "the image $target could not be pulled; still on $current" || true
   statera_die "the image could not be pulled; nothing changed"
 fi
 # PostgreSQL is recreated only when its digest changed (a short restart).
@@ -135,7 +144,7 @@ if [ "$healthy" = 1 ] && [ "$actual" = "$target_head" ]; then
   printf '%s\n' "$target_head" >"$DIR/state/current-migration"
   chmod 600 "$DIR/state/current-release" "$DIR/state/current-migration"
   statera_record_operation "$DIR/state" update "$target" succeeded "$archive"
-  app update-report
+  report
   log "updated from $current to $target (database at $target_head)"
   exit 0
 fi
@@ -157,6 +166,6 @@ until app health >/dev/null 2>&1 || [ $tries -ge 36 ]; do
   sleep 5
 done
 statera_record_operation "$DIR/state" update "$target" rolled-back "$archive"
-app update-report --error "$reason; $current and the backup taken before the update were restored" || true
+report --error "$reason; $current and the backup taken before the update were restored" || true
 log "rolled back to $current"
 exit 1

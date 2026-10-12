@@ -8,8 +8,9 @@
 #
 # The App image is pinned by digest in `.env` (`STATERA_IMAGE`, from the
 # release manifest) — never by a moving tag (enhancement E6). No Redis (WP1).
-# The updater runs the scheduled update (off until the server administrator
-# sets a window with `statera update --schedule`).
+# The updater runs the update an administrator asked for from the screen, and
+# the scheduled update (off until a window is set, from the same screen or
+# with `statera update --schedule`).
 #
 # Offsite backup (enhancement E3): PostgreSQL runs **our** image
 # (postgres:16 + pgBackRest, pinned by digest in the release manifest like
@@ -142,6 +143,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Jakarta}
       STATERA_DIR: ${STATERA_DIR:-/opt/statera}
+      STATERA_APP_RELEASE_BASE_URL: ${STATERA_APP_RELEASE_BASE_URL:-}
     working_dir: ${STATERA_DIR:-/opt/statera}
     entrypoint: ["sh", "${STATERA_DIR:-/opt/statera}/updater.sh"]
     volumes:

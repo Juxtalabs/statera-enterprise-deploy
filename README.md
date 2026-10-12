@@ -28,13 +28,13 @@ Download the pinned installer, verify it, and run it with the values
 Juxtalabs issued (the activation code, the first legal entity's code and name):
 
 ```bash
-VERSION=v1.3.1
+VERSION=v1.3.2
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh" -o install.sh
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh.sha256" -o install.sh.sha256
 sha256sum --check install.sh.sha256
 sudo sh install.sh \
   --domain erp.example.co.id \
-  --release app-v1.2.0 \
+  --release app-v1.3.2 \
   --entity-code PTABC \
   --entity-name "PT Contoh Abadi"
 ```
@@ -69,7 +69,7 @@ first free loopback port from 8010, unless `--port` names one. It requires
 ```bash
 sudo sh install.sh --instance rsui-bogor --no-proxy \
   --domain erp.rsui-bogor.example.co.id \
-  --release app-v1.2.0 \
+  --release app-v1.3.2 \
   --entity-code RSUIBG \
   --entity-name "RSUI Bogor"
 ```
@@ -87,13 +87,21 @@ sudo statera version              # the CLI version and the installed App releas
 sudo statera update               # the App: backup → pull the pinned digest →
                                   # migrate → health and migration-head checks →
                                   # rollback + restore on failure
-sudo statera self-update v1.3.1   # the CLI/bundle: download, verify, reinstall
+sudo statera self-update v1.3.2   # the CLI/bundle: download, verify, reinstall
 ```
 
 `statera update` without a target installs the newest release the last check-in
 offered; `--to app-vX.Y.Z` pins one explicitly. `statera update --schedule
 "sun 02:00"` switches the scheduled window on (off by default), and `statera
 doctor` checks an installation at any time.
+
+From App 1.3.2 an administrator can do both from the screen **Administrasi
+Sistem › Lisensi & fitur**: *Perbarui sekarang* records a request that the
+`updater` container of the bundle carries out within five minutes (the same
+`update.sh`, so the same backup and rollback), and the window is set there too.
+The screen also shows the licence, the installed and the newest version, and
+the history of every update — who or what started it, from which version to
+which, and how it ended.
 
 Persistent configuration is `/opt/statera/.env` (root, mode 0600) together with
 `/opt/statera/state/` (the installed release, the database migration head, the

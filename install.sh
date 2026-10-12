@@ -4,10 +4,10 @@
 #
 # Download the pinned, checksummed installer of a CLI release and run it:
 #
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.2/install.sh -o install.sh
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.2/install.sh.sha256 -o install.sh.sha256
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.3/install.sh -o install.sh
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.3/install.sh.sha256 -o install.sh.sha256
 #   sha256sum --check install.sh.sha256
-#   sudo sh install.sh --domain erp.example.co.id --release app-v1.3.2 \
+#   sudo sh install.sh --domain erp.example.co.id --release app-v1.3.3 \
 #                     --entity-code PTABC --entity-name "PT Contoh Abadi" \
 #                     --s3-bucket statera-backup-ptabc --s3-region ap-southeast-1 \
 #                     --s3-access-key-id AKIAXXXXXXXXXXXXXXXX
@@ -41,19 +41,23 @@
 #   --control-url <url>       Statera Control (default https://statera-control.juxtalabs.io;
 #                             an explicit http:// URL is allowed for a local rehearsal)
 #
-# The offsite backup (enhancement E3, all of them together or none):
+# The offsite backup (enhancement E3). When Statera Control is configured to
+# provision it, Control creates the company's private bucket and its IAM user
+# when the installation is created, and install.sh fetches them with the
+# activation code — no options needed. The options below are only for a
+# Control that did not provision a bucket (all of them together or none):
 #   --s3-bucket <name>            the company's private bucket
 #   --s3-region <region>          e.g. ap-southeast-1
 #   --s3-access-key-id <id>       the IAM user Juxtalabs created for this company
 #   --s3-secret-access-key <key>  its secret (asked for when omitted)
 #   --s3-endpoint <host[:port]>   an S3-compatible endpoint (MinIO); AWS is the default
 #
-# Without the four S3 options the install has no offsite backup: nothing runs
-# pgBackRest, `BACKUP_ARCHIVE_MODE=off` and no TLS server starts. With them,
-# install.sh generates the repository cipher passphrase and the pgBackRest TLS
-# certificates, then `statera install` creates the attachment age identity
-# (its only copy goes to Juxtalabs' escrow), creates the stanza and takes the
-# first full backup.
+# Without a bucket (from Control or the options) the install has no offsite
+# backup: nothing runs pgBackRest, `BACKUP_ARCHIVE_MODE=off` and no TLS server
+# starts. With one, install.sh generates the repository cipher passphrase and
+# the pgBackRest TLS certificates, then `statera install` creates the
+# attachment age identity (its only copy goes to Juxtalabs' escrow), creates
+# the stanza and takes the first full backup.
 #
 # Environment:
 #   STATERA_RELEASE_BASE_URL      where this CLI release's assets are served
@@ -67,7 +71,7 @@
 # and pulled with a credential Control issues for the activation code.
 set -eu
 
-STATERA_CLI_VERSION=1.3.2
+STATERA_CLI_VERSION=1.3.3
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 RELEASE_BASE=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/v$STATERA_CLI_VERSION}
 DIR=${STATERA_DIR:-}
@@ -75,7 +79,7 @@ CONTROL=https://statera-control.juxtalabs.io
 CONTROL_EXPLICIT=0
 # The App release this CLI was published with; CLI and App versions move
 # separately, so a CLI fix does not name an App release that does not exist.
-DEFAULT_APP_RELEASE=app-v1.3.2
+DEFAULT_APP_RELEASE=app-v1.3.3
 DOMAIN="" CODE="" ENTITY_CODE="" ENTITY_NAME="" PROXY=1 PORT=8000 PROXY_NETWORK=""
 INSTANCE="" PORT_GIVEN=0
 APP_RELEASE=$DEFAULT_APP_RELEASE SELF_UPDATE=0
@@ -420,6 +424,30 @@ else
       || die "the registry refused the credential Statera Control issued"
   else
     die "Statera Control refused the activation code"
+  fi
+fi
+
+# A first run with no --s3-* options asks Control whether it provisioned a
+# backup bucket for this company (it does when its AWS settings are present).
+# The answer is fetched with the same activation code as the registry
+# credential, before the code is spent by `statera install`; an older Control
+# without the endpoint answers 404 and the install goes on without an offsite
+# backup, as before. A resumed run already has its `.env` — it must not ask.
+if [ "$RESUME" = 0 ] && [ "$OFFSITE" = 0 ]; then
+  offsite=$(control_fetch -X POST "$CONTROL/v1/offsite" \
+    -H 'content-type: application/json' -d "{\"activation_code\":\"$CODE\"}" 2>/dev/null) || offsite=""
+  if [ -n "$offsite" ]; then
+    offsite_bucket=$(printf '%s' "$offsite" | jq -r '.bucket // empty' 2>/dev/null) || offsite_bucket=""
+    if [ -n "$offsite_bucket" ]; then
+      S3_BUCKET=$offsite_bucket
+      S3_REGION=$(printf '%s' "$offsite" | jq -r .region)
+      S3_ACCESS=$(printf '%s' "$offsite" | jq -r .access_key_id)
+      S3_SECRET=$(printf '%s' "$offsite" | jq -r .secret_access_key)
+      # pgBackRest in the PostgreSQL container has no default endpoint.
+      [ -n "$S3_ENDPOINT" ] || S3_ENDPOINT="s3.$S3_REGION.amazonaws.com"
+      OFFSITE=1
+      note "the backup bucket from Statera Control: $S3_BUCKET"
+    fi
   fi
 fi
 

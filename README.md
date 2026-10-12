@@ -28,13 +28,13 @@ Download the pinned installer, verify it, and run it with the values
 Juxtalabs issued (the activation code, the first legal entity's code and name):
 
 ```bash
-VERSION=v1.3.2
+VERSION=v1.3.3
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh" -o install.sh
 curl -fsSL "https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/$VERSION/install.sh.sha256" -o install.sh.sha256
 sha256sum --check install.sh.sha256
 sudo sh install.sh \
   --domain erp.example.co.id \
-  --release app-v1.3.2 \
+  --release app-v1.3.3 \
   --entity-code PTABC \
   --entity-name "PT Contoh Abadi"
 ```
@@ -69,7 +69,7 @@ first free loopback port from 8010, unless `--port` names one. It requires
 ```bash
 sudo sh install.sh --instance rsui-bogor --no-proxy \
   --domain erp.rsui-bogor.example.co.id \
-  --release app-v1.3.2 \
+  --release app-v1.3.3 \
   --entity-code RSUIBG \
   --entity-name "RSUI Bogor"
 ```
@@ -87,7 +87,7 @@ sudo statera version              # the CLI version and the installed App releas
 sudo statera update               # the App: backup → pull the pinned digest →
                                   # migrate → health and migration-head checks →
                                   # rollback + restore on failure
-sudo statera self-update v1.3.2   # the CLI/bundle: download, verify, reinstall
+sudo statera self-update v1.3.3   # the CLI/bundle: download, verify, reinstall
 ```
 
 `statera update` without a target installs the newest release the last check-in

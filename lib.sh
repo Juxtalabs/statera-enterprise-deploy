@@ -13,6 +13,13 @@ statera_die() {
   exit 1
 }
 
+# One mutating operation at a time on an installation: install, self-update,
+# update and both restores take the same lock file install.sh already uses.
+statera_lock() {
+  exec 9>"$1/.statera.lock"
+  flock -n 9 || statera_die "another Statera operation is already running on this server"
+}
+
 # A valid install instance name (enhancement: several installs on one server):
 # 1–20 characters, the first a lowercase letter or digit, the rest letters,
 # digits or dashes. The name becomes a folder, a compose project and a command.
@@ -46,7 +53,7 @@ statera_sha256_of() {
 # The expected digest from a one-line `sha256sum` file (`<hash>  <name>`), or
 # nothing when the file does not carry one.
 statera_expected_sha256() {
-  awk 'NR == 1 && $1 ~ /^[0-9a-f]{64}$/ {print $1}' "$1"
+  awk 'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ {print $1}' "$1"
 }
 
 # Verify `file` against `expected`; `what` names it in the refusal.

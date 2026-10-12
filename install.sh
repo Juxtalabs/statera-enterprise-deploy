@@ -4,10 +4,10 @@
 #
 # Download the pinned, checksummed installer of a CLI release and run it:
 #
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.3/install.sh -o install.sh
-#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.3/install.sh.sha256 -o install.sh.sha256
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.4/install.sh -o install.sh
+#   curl -fsSL https://github.com/Juxtalabs/statera-enterprise-deploy/releases/download/v1.3.4/install.sh.sha256 -o install.sh.sha256
 #   sha256sum --check install.sh.sha256
-#   sudo sh install.sh --domain erp.example.co.id --release app-v1.3.3 \
+#   sudo sh install.sh --domain erp.example.co.id --release app-v1.3.6 \
 #                     --entity-code PTABC --entity-name "PT Contoh Abadi" \
 #                     --s3-bucket statera-backup-ptabc --s3-region ap-southeast-1 \
 #                     --s3-access-key-id AKIAXXXXXXXXXXXXXXXX
@@ -71,7 +71,7 @@
 # and pulled with a credential Control issues for the activation code.
 set -eu
 
-STATERA_CLI_VERSION=1.3.3
+STATERA_CLI_VERSION=1.3.4
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 RELEASE_BASE=${STATERA_RELEASE_BASE_URL:-https://github.com/$STATERA_REPOSITORY/releases/download/v$STATERA_CLI_VERSION}
 DIR=${STATERA_DIR:-}
@@ -79,7 +79,7 @@ CONTROL=https://statera-control.juxtalabs.io
 CONTROL_EXPLICIT=0
 # The App release this CLI was published with; CLI and App versions move
 # separately, so a CLI fix does not name an App release that does not exist.
-DEFAULT_APP_RELEASE=app-v1.3.3
+DEFAULT_APP_RELEASE=app-v1.3.6
 DOMAIN="" CODE="" ENTITY_CODE="" ENTITY_NAME="" PROXY=1 PORT=8000 PROXY_NETWORK=""
 INSTANCE="" PORT_GIVEN=0
 APP_RELEASE=$DEFAULT_APP_RELEASE SELF_UPDATE=0

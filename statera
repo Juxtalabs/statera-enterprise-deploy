@@ -7,10 +7,14 @@
 #   statera self-update vX.Y.Z             update the CLI/bundle from a release
 #   statera update [--to app-vX.Y.Z]       the App update (update.sh)
 #   statera update --schedule "<window>"   e.g. "sun 02:00", "daily 03:30", "off"
-#   statera restore <archive>              stops the App, restores, starts it
+#   statera restore <archive>              stops the App, restores, starts it;
+#                                          a failed restore leaves it stopped
+#   statera start                          starts the App after a failed restore
 #   statera offsite-backup restore …       stops the App, restores from S3
 #                                          (pgBackRest on the Postgres host,
-#                                          then the attachments), starts it
+#                                          then the attachments), starts it;
+#                                          a failure leaves the App stopped and
+#                                          the previous database in a volume
 #   statera logs [service]                 container logs
 #   statera <anything else>                `statera <...>` inside the App
 #                                          (doctor, backup, offsite-backup
@@ -18,7 +22,7 @@
 #                                          admin reset-passkeys --username …)
 set -eu
 
-STATERA_CLI_VERSION=1.3.3
+STATERA_CLI_VERSION=1.3.4
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 # The install folder: `STATERA_DIR` when set (an instance install exports it),
 # otherwise the folder this command was installed from. The symlink under
@@ -80,7 +84,7 @@ case "${1:-}" in
       || { echo "self-update: $target/install.sh could not be downloaded from $base" >&2; exit 1; }
     curl --proto "$proto" --tlsv1.2 -fsSL "$base/install.sh.sha256" -o "$tmp/install.sh.sha256" \
       || { echo "self-update: $target/install.sh.sha256 could not be downloaded from $base" >&2; exit 1; }
-    expected=$(awk 'NR == 1 && $1 ~ /^[0-9a-f]{64}$/ {print $1}' "$tmp/install.sh.sha256")
+    expected=$(awk 'NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-f]/ {print $1}' "$tmp/install.sh.sha256")
     actual=$(sha256sum "$tmp/install.sh" | awk '{print $1}')
     [ -n "$expected" ] && [ "$actual" = "$expected" ] \
       || { echo "self-update: the installer checksum did not match" >&2; exit 1; }
@@ -108,11 +112,18 @@ case "${1:-}" in
   restore)
     shift
     [ $# -ge 1 ] || { echo "usage: statera restore <archive in /var/lib/statera/backups>" >&2; exit 2; }
+    . "$DIR/lib.sh"
+    statera_lock "$DIR"
     compose stop app
-    status=0
-    compose run --rm --no-deps -T app statera restore "$1" --yes || status=$?
+    if ! compose run --rm --no-deps -T app statera restore "$1" --yes; then
+      echo "Error: the restore failed. The database and the attachments are as they were before; the App was left stopped. Read the error above, then run: statera start" >&2
+      exit 1
+    fi
+    rm -f "$DIR/state/update-in-progress"
     compose up -d app
-    exit "$status"
+    ;;
+  start)
+    compose up -d app
     ;;
   offsite-backup)
     shift
@@ -141,10 +152,19 @@ case "${1:-}" in
     [ -n "$identity" ] || { echo "$usage" >&2; exit 2; }
     [ -f "$identity" ] || { echo "Error: the identity file does not exist: $identity" >&2; exit 1; }
     [ "$(id -u)" = 0 ] || { echo "Error: run as root (sudo)" >&2; exit 1; }
-
+    . "$DIR/lib.sh"
+    statera_lock "$DIR"
+    echo "== checking the offsite repository"
+    compose run --rm --no-deps postgres pgbackrest --stanza=statera info >/dev/null \
+      || { echo "Error: the offsite repository cannot be read; nothing was changed" >&2; exit 1; }
     echo "== stopping the App and PostgreSQL"
     compose stop app
     compose stop postgres
+    echo "== copying the database aside"
+    previous="$(basename "$DIR")-pgdata-previous-$(date -u +%Y%m%dT%H%M%SZ)"
+    compose run --rm --no-deps --entrypoint sh -v "$previous:/previous" postgres \
+      -c 'cp -a /var/lib/postgresql/data/. /previous/' \
+      || { compose up -d postgres; echo "Error: the current database could not be copied aside (is the disk full?); nothing was changed and the App was left stopped. Run: statera start" >&2; exit 1; }
     echo "== emptying the PostgreSQL data directory"
     compose run --rm --no-deps --entrypoint sh postgres \
       -c 'find /var/lib/postgresql/data -mindepth 1 -delete' \
@@ -159,8 +179,10 @@ case "${1:-}" in
         pgbackrest --stanza=statera restore || status=$?
     fi
     if [ "$status" != 0 ]; then
+      compose run --rm --no-deps --entrypoint sh -v "$previous:/previous" postgres \
+        -c 'find /var/lib/postgresql/data -mindepth 1 -delete && cp -a /previous/. /var/lib/postgresql/data/'
       compose up -d postgres
-      echo "Error: the database restore failed — PostgreSQL was started again on the emptied data directory" >&2
+      echo "Error: the database restore failed. The previous database was put back from the volume $previous; the App was left stopped. Run: statera start" >&2
       exit "$status"
     fi
     echo "== starting PostgreSQL"
@@ -177,12 +199,12 @@ case "${1:-}" in
       -v "$identity:/tmp/statera-attachments-identity:ro" app \
       sh -c 'statera db migrate && statera offsite-backup restore --identity /tmp/statera-attachments-identity' \
       || status=$?
-    compose up -d app
     if [ "$status" != 0 ]; then
-      echo "Error: the attachments could not be restored (see above)" >&2
+      echo "Error: the attachments could not be restored (see above). The database is the restored one; the attachment folder is unchanged; the previous database is kept in the volume $previous. The App was left stopped." >&2
       exit "$status"
     fi
-    echo "restored from S3; the App is starting"
+    compose up -d app
+    echo "restored from S3; the App is starting. The previous database is kept in the Docker volume $previous — remove it once the restore is checked."
     exit 0
     ;;
   logs)

@@ -45,8 +45,12 @@ jobs:
           sh -n updater.sh
           sh -n statera
           bash -n tests/test-statera.sh
-          shellcheck -x install.sh lib.sh update.sh updater.sh statera tests/test-statera.sh
+          bash -n tests/test-restore.sh
+          bash -n tests/test-update.sh
+          shellcheck -x install.sh lib.sh update.sh updater.sh statera tests/test-statera.sh tests/test-restore.sh tests/test-update.sh
           bash tests/test-statera.sh
+          bash tests/test-restore.sh
+          bash tests/test-update.sh
 
       - name: Validate the Compose definition
         run: |

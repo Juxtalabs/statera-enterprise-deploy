@@ -27,7 +27,7 @@
 #                                 (default: the App release's GitHub page)
 set -eu
 
-STATERA_CLI_VERSION=1.3.4
+STATERA_CLI_VERSION=1.3.5
 STATERA_REPOSITORY=Juxtalabs/statera-enterprise-deploy
 DIR=${STATERA_DIR:-/opt/statera}
 log() { echo "statera update: $*"; }
@@ -207,6 +207,11 @@ printf '%s\n%s\n%s\n' "$current" "$target" "$archive" >"$DIR/state/update-in-pro
 statera_set_env "$DIR/.env" STATERA_RELEASE "$target"
 statera_set_env "$DIR/.env" STATERA_IMAGE "$target_image"
 statera_set_env "$DIR/.env" STATERA_POSTGRES_IMAGE "$target_postgres"
+# An install from before the key existed gains it once; never rotated here,
+# because every printed QR is signed with it.
+if ! grep -q '^DOCUMENT_VERIFICATION_SECRET=.' "$DIR/.env"; then
+  statera_set_env "$DIR/.env" DOCUMENT_VERIFICATION_SECRET "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+fi
 # PostgreSQL is recreated only when its digest changed (a short restart).
 started=1
 compose up -d postgres app || started=0

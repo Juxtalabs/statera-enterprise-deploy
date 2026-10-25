@@ -202,6 +202,8 @@ upped="$(line_of "up -d postgres app")"
   || fail "D-T1: the order is not pull, stop, backup, start"
 [[ ! -e "$install/state/update-in-progress" ]] || fail "D-T1: the in-progress marker was left"
 grep -q '^STATERA_RELEASE=app-v9.9.9$' "$install/.env" || fail "D-T1: .env does not name the target"
+grep -Eq '^DOCUMENT_VERIFICATION_SECRET=[0-9a-f]{64}$' "$install/.env" \
+  || fail "D-T1: an install without the verification secret did not gain one"
 
 # --- D-T2: the pull fails → nothing changed -----------------------------------------
 
